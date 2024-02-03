@@ -1,7 +1,7 @@
 import os
 import json
 from Connector import get_data, post_data
-
+from openpyxl import load_workbook
 
 def get_info(OAUTH):
 
@@ -127,3 +127,33 @@ def provision_agents(te_tests, OAUTH):
 
 
 
+def read_excel():
+
+    agents = []
+    tests = {}
+    workbook = load_workbook(filename='cvs_bueno2.xlsx')
+    sheet = workbook.active
+
+    for row in sheet.iter_rows(values_only=True):
+
+        if row[0] is None: #si no hay email no hacemos nada 
+            continue  
+        
+        account_group = row[0]
+        test_id = row[1]
+        agent_name = row[2]
+
+        if test_id in tests:
+            
+            tests[test_id].append(agent_name)
+
+        else:
+
+            tests[test_id] = [agent_name]
+
+
+    return tests
+
+
+
+print(read_excel())
