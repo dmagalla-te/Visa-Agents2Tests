@@ -2,91 +2,22 @@ import os
 import json
 from Connector import get_data, post_data
 from openpyxl import load_workbook
+from datetime import datetime
 
-def get_info(OAUTH):
+def timestamp():
 
-    headers = {
-        'Authorization' : 'Bearer ' + OAUTH,
-        'Content-Type' : 'application/json'
-    }
+    date_time_now = datetime.now()
+    return date_time_now.strftime("%d%b%y-%H%M%S")
 
-    endp_url1 = "https://api.thousandeyes.com/v6/account-groups.json"
-    endp_url2 = "https://api.thousandeyes.com/v6/agents.json"
-    endp_url3 = "https://api.thousandeyes.com/v6/tests.json"
+def set_logs(file_path, logs):
     
+    logs = str(logs)
+    file_name = file_path + '.log'
+    f = open(file_name, 'a+')  # open file in append mode
+    f.write(logs)
+    f.close()
 
-    
-    account_groups = get_data(headers, endp_url1, params={})
-
-    te_agents = {}
-    te_tests = {}
-
-    for aid in account_groups['accountGroups']:
-
-        #print("AID: ", aid.get("aid"))
-        agents = get_data(headers, endp_url2, params={"aid":aid.get("aid"), "agentTypes":"CLOUD"})
-
-        if "agents" in agents:
-
-            for agent in agents["agents"]:
-
-                te_agents.update({agent.get("agentName"):[aid.get("aid"), agent.get("agentId")]})
-
-        tests = get_data(headers, endp_url3, params={"aid":aid.get("aid")})
-
-        if "test" in tests:
-
-            for test in tests["test"]:
-
-                endp_url4 = "https://api.thousandeyes.com/v6/tests/%s.json" % test.get("testId")
-                test_details = get_data(headers, endp_url4, params={"aid":aid.get("aid")})
-
-                # "Test URL" : [ testId, aid,[old agents],[agents para test]]
-                te_tests.update({test.get("url"):[aid.get("aid"), test.get("testId"),[]]})
-
-    print(te_agents)
-    print(te_tests)
-
-    return te_agents, te_tests
-
-
-
-
-# Function to read all JSON files in a folder
-def read_files(directory_path: str) -> list:
-
-    agents = []
-
-    for filename in os.listdir(directory_path):
-
-        if filename.endswith('.json'):
-
-            file_path = os.path.join(directory_path, filename)
-
-            with open(file_path, 'r') as file:
-                
-                data = json.load(file)
-                agents.append(data)
-
-    return agents
-
-
-def agents2Tests(te_tests, te_agents, cvs_agents):
-
-    for cvs_data in cvs_agents:
-
-        for url in cvs_data["urls"]:
-
-            if url not in te_tests:
-                continue
-
-            if cvs_data["name"] not in te_agents:
-                continue
-
-            te_tests[url][2].append(te_agents[cvs_data["name"]][1])
-
-
-    return te_tests
+    return "Logs saved"
 
 
 def provision_agents(te_tests, OAUTH):
@@ -126,15 +57,39 @@ def provision_agents(te_tests, OAUTH):
             print(post_data(headers, endp_url=url, payload=json.dumps(payload)))
 
 
+######################
+########### account, testname , source
+###########
+def get_tests(headers, aid):
+
+    tests_endp = "https://api.thousandeyes.com/v6/tests.json"
+
+    tests = get_data(headers, tests_endp, params={"aid":aid})
+
+    if 'test' in tests:
+        
+        tests_relation = {}
+
+        for test in tests['test']:
+
+            tests_relation.update({test.get('testName'): test.get("testId")})
+
+        return tests_relation
+    
+    else:
+
+        return False
+
+
 
 def read_excel():
 
-    agents = []
     tests = {}
-    workbook = load_workbook(filename='cvs_bueno2.xlsx')
+    workbook = load_workbook(filename='CIT.xlsx')
     sheet = workbook.active
 
-    for row in sheet.iter_rows(values_only=True):
+
+    for row in sheet.iter_rows(min_row=2, max_col=5, max_row=sheet.max_row, values_only=True):   
 
         if row[0] is None: #si no hay email no hacemos nada 
             continue  
@@ -143,17 +98,98 @@ def read_excel():
         test_id = row[1]
         agent_name = row[2]
 
-        if test_id in tests:
-            
-            tests[test_id].append(agent_name)
+        if account_group in tests: 
 
+            if test_id in tests[account_group]:
+                
+                tests[account_group][test_id].append(agent_name)
+
+            else:
+
+                tests[account_group][test_id] = [agent_name]
         else:
-
-            tests[test_id] = [agent_name]
+            tests[account_group] = {test_id:[agent_name]}
 
 
     return tests
 
 
 
-print(read_excel())
+def get_agents(headers, aid):
+
+    endp_url2 = "https://api.thousandeyes.com/v6/agents.json"
+
+    agents = get_data(headers, endp_url2, params={"aid":aid})
+
+    if 'agents' in agents:
+        
+        agent_relation = {}
+
+        for agent in agents['agents']:
+
+            agent_relation.update({agent.get('agentName'): agent.get("agentId")})
+
+        return agent_relation
+    
+    else:
+
+        return False
+    
+
+
+def agent_ids(OAUTH, test_agents):
+
+    headers = {
+        'Authorization' : 'Bearer ' + OAUTH,
+        'Content-Type' : 'application/json'
+    }
+
+    logs = ''
+
+
+    for aid, inner_dict in test_agents.items():
+        print('ACCOUNT GROUP:', aid)
+        agents = get_agents(headers, aid) #dict relacion AGENT_NAME: AGENT_ID
+        tests = get_tests(headers, aid) #dict relacion TEST_NAME: TEST_ID
+
+        for test_name, agents_names in inner_dict.items():
+            print('TEST', test_name)
+            agents_ids = []
+
+            for name in agents_names:
+                #hacer lista de agent ids
+                my_variable = agents.get(name)
+
+                if isinstance(my_variable, int):
+                    agents_ids.append({"agentId": my_variable})
+
+
+            print('AGENTS', agents_ids)
+
+            test_id = tests.get(test_name)
+            #get test details para sacar test type
+            test_details_endp = "https://api.thousandeyes.com/v6/tests/%s.json" % test_id
+            test_details = get_data(headers, test_details_endp, params={"aid":aid})
+
+            test_type = test_details['test'][0]['type']
+
+
+            #Una vez que tengamos la lista de los agent ids post a los test
+            url = "https://api.thousandeyes.com/v6/tests/%s/%s/update.json?aid=%s" % (test_type,test_id, aid)
+            print(url)
+            payload = {"agents": agents_ids, "enabled": 1} #asgin agents and enable test
+            
+            if agents_ids != []:
+                try:
+                    status_code = post_data(headers, endp_url=url, payload=json.dumps(payload))
+                    logs += "\n" + timestamp() + "-> TEST: " + test_name +' Status code: ' + str(status_code) + ' Url: ' + url
+
+
+                except:
+                    logs += "\n" + timestamp() + "-> This test could not be updated: " + test_name + ' Url: ' + url
+    
+    
+    set_logs(file_path="Cardinal", logs=logs)
+
+            
+
